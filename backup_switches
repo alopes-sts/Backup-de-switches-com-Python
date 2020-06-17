@@ -1,0 +1,84 @@
+import smtplib
+import paramiko
+from netmiko import ConnectHandler
+from paramiko.ssh_exception import AuthenticationException
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
+
+def conectaSwitch():
+	# Definições de login e senha para os switches
+	login = 'usuario'
+	pwd = 'senha1'
+	pwd_secret = 'senha2'
+	conecta_ssh = paramiko.SSHClient()            # Cria uma sessão SSH
+	conecta_ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	arq_switches = open("switch.txt", "r")        # Leitura do arquivo texto com o IP dos switches
+	for aline in arq_switches:                    # Lê todas as linhas do arquivo texto
+		dados = aline.split(",")                    # Define a virgula como caracter separador dos campos no arquivo texto
+		ip_switch = dados[0]                        # Cria variável com o IP do switch
+		hostname = dados[1].rstrip()                # Cria variável com o nome do switch
+		try:
+			conecta_ssh.connect(ip_switch, username=login, password=pwd, look_for_keys=False, allow_agent=False)  # Faz a conexão com o switch
+			comando = conecta_ssh.invoke_shell()      # Cria uma instância para execução dos comandos
+		except AuthenticationException:             # Se ocorrer uma falha de autenticação irá adicionar uma mensagem na lista de erros
+			erro = ' --> Falha de autenticação.'
+			erro = ip_switch + erro
+			lista_erros.append(erro)
+			continue
+		except:  # Qualquer outro erro que ocorre no acesso ao switch também irá adicionar uma mensagem na lista de erros
+			erro = ' --> Backup não realizado.'
+			erro = ip_switch + erro
+			lista_erros.append(erro)
+			continue
+
+		# Envio dos comandos para acessar o modo de configuração do switch
+		comando.send('\n')
+		comando.send('en\n')
+		comando.send(pwd_secret + '\n')
+		comando.send(
+			'show run | redirect tftp://10.2.50.110/' + hostname + '--' + ip_switch + '.cfg\n')  # Envia uma cópia do running config para o servidor de TFTP
+
+		# Faz uma nova conexão no switch por outro método para captura o hostname
+		get_name = {'device_type': 'cisco_ios', 'ip': ip_switch, 'username': login, 'password': pwd,
+					'secret': pwd_secret}
+		net_connect = ConnectHandler(**get_name)
+		net_connect.enable()
+		name = net_connect.send_command("show run | in hostname")  # Envia o comando para verificar o hostname do switch
+		name = name.split()
+		get_hostname = name[1]        # Associa o hostname do switch a uma variável
+		if get_hostname != hostname:  # Compara o hostname do switch com o nome que está na planilha
+			erro = ' --> O hostname do switch não é o mesmo nome que está no arquivo texto.'
+			erro = ip_switch + erro
+			lista_erros.append(erro)    # Adiciona a informação de hostname incorreto na lista de erros
+
+	arq_switches.close()
+
+def enviaEmail():                 # Montando a mensagem para o envio
+	msg = MIMEMultipart()           # Cria o container de saída do email
+	if len(lista_erros) > 0:        # Verifica se existem mensagens na lista de erros, se existir, adiciona no corpo do email
+		img = 'erro.png'
+		msg['Subject'] = 'Backup com falha'
+		texto = '<img src="cid:erro.png"><p style="color: red;">Ocorreram falhas, verifique os problemas abaixo:<p style="color: black;">' + '<br>'.join(lista_erros)
+	else:
+		img = 'sucesso.png'
+		msg['Subject'] = 'Backup completo'
+		texto = '<img src="cid:sucesso.png"><p style="color: blue;">Backup dos switches concluído sem erros'
+
+	imagem = open(img, 'rb')
+	msgImage = MIMEImage(imagem.read())
+	imagem.close()
+	msgImage.add_header('Content-ID', img)
+	msg.attach(msgImage)
+	body_msg = texto
+	msg['From'] = 'remetente@dominio.com'
+	msg['To'] = 'destinatario@dominio.com'
+	msg.attach(MIMEText(body_msg, 'html'))
+	smtp = smtplib.SMTP('smtp.marimex.com.br', 25)
+	smtp.sendmail(msg['From'], msg['To'], msg.as_string())
+	smtp.quit()
+
+
+lista_erros = []     #Cria um array vazio para inserir o IP dos switches quando ocorrer falha
+conectaSwitch()
+enviaEmail()         #Chama a função que irá definir os parâmetros, montar e enviar o email
