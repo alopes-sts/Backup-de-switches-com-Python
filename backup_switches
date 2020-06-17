@@ -37,7 +37,7 @@ def conectaSwitch():
 		comando.send('en\n')
 		comando.send(pwd_secret + '\n')
 		comando.send(
-			'show run | redirect tftp://10.2.50.110/' + hostname + '--' + ip_switch + '.cfg\n')  # Envia uma cópia do running config para o servidor de TFTP
+			'show run | redirect tftp://X.X.X.X/' + hostname + '--' + ip_switch + '.cfg\n')  # Envia uma cópia do running config para o servidor de TFTP
 
 		# Faz uma nova conexão no switch por outro método para captura o hostname
 		get_name = {'device_type': 'cisco_ios', 'ip': ip_switch, 'username': login, 'password': pwd,
